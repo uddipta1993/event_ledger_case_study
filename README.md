@@ -49,14 +49,13 @@ The Gateway uses bounded connect/read timeouts, one retry with a short backoff, 
 
 ## Tests
 
-Run both services' test suites with:
+Run both services' test suites from the repository root with:
 
 ```sh
-mvn -f account/pom.xml test
-mvn -f gateway/pom.xml test
+mvn test
 ```
 
-Tests cover validation, idempotency, order-independent balance calculation, trace propagation, dependency failure handling, and an end-to-end Gateway-to-Account flow.
+Tests cover validation, idempotency, order-independent balance calculation, trace propagation, dependency failure and circuit-breaker behavior, plus an end-to-end HTTP flow from the Gateway to a running Account Service.
 
 ## Metrics and health
 

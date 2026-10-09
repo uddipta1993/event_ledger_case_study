@@ -1,33 +1,26 @@
 package com.example.gateway;
 
 import static org.junit.jupiter.api.Assertions.*;
-import com.sun.net.httpserver.HttpServer;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
+import com.example.account.AccountApplication;
 import java.math.BigDecimal;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.RestTemplate;
 
+@SpringBootTest(classes=AccountApplication.class,webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT)
 class GatewayAccountIntegrationTest {
-    @Test void submitsGatewayEventOverHttpAndPropagatesTraceToAccountEndpoint() throws Exception {
-        final AtomicInteger calls=new AtomicInteger(); final String[] receivedTrace=new String[1]; final String[] receivedBody=new String[1];
-        HttpServer account=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
-        account.createContext("/accounts/a1/transactions",exchange -> {
-            calls.incrementAndGet(); receivedTrace[0]=exchange.getRequestHeaders().getFirst("X-Trace-Id");
-            InputStream in=exchange.getRequestBody(); ByteArrayOutputStream body=new ByteArrayOutputStream(); byte[] buf=new byte[512]; int n;
-            while((n=in.read(buf))!=-1) body.write(buf,0,n); receivedBody[0]=new String(body.toByteArray(),StandardCharsets.UTF_8);
-            byte[] response="{}".getBytes(StandardCharsets.UTF_8); exchange.getResponseHeaders().add("Content-Type","application/json"); exchange.sendResponseHeaders(200,response.length); exchange.getResponseBody().write(response); exchange.close();
-        });
-        account.start();
-        try {
-            EventController gateway=new EventController(new RestTemplate(),"http://127.0.0.1:"+account.getAddress().getPort());
-            EventController.Event e=new EventController.Event(); e.eventId="evt-integration"; e.accountId="a1"; e.type="CREDIT"; e.amount=new BigDecimal("8.25"); e.currency="USD"; e.eventTimestamp="2026-05-15T14:02:11Z";
-            assertEquals(HttpStatus.CREATED,gateway.submit(e,"trace-integration-1").getStatusCode());
-            assertEquals(1,calls.get()); assertEquals("trace-integration-1",receivedTrace[0]); assertTrue(receivedBody[0].contains("evt-integration"));
-        } finally { account.stop(0); }
+    @LocalServerPort private int accountPort;
+
+    @Test void appliesGatewayEventToRunningAccountServiceOverHttp() {
+        EventController gateway=new EventController(new RestTemplate(),"http://127.0.0.1:"+accountPort);
+        EventController.Event e=new EventController.Event(); e.eventId="evt-integration"; e.accountId="a1"; e.type="CREDIT"; e.amount=new BigDecimal("8.25"); e.currency="USD"; e.eventTimestamp="2026-05-15T14:02:11Z";
+        assertEquals(HttpStatus.CREATED,gateway.submit(e,"trace-integration-1").getStatusCode());
+        org.springframework.http.ResponseEntity<?> response=gateway.balance("a1","trace-integration-1");
+        assertEquals(HttpStatus.OK,response.getStatusCode());
+        assertEquals(new BigDecimal("8.25"),new BigDecimal(String.valueOf(((Map<?,?>)response.getBody()).get("balance"))));
     }
 }
