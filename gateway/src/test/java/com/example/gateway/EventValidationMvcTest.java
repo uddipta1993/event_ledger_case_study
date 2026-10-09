@@ -16,6 +16,7 @@ import org.springframework.web.client.RestTemplate;
 class EventValidationMvcTest {
     @Autowired private MockMvc mvc;
     @MockBean private RestTemplate restTemplate;
+    @MockBean private EventStore eventStore;
 
     @Test void rejectsMissingAndNonPositiveAmounts() throws Exception {
         mvc.perform(post("/events").contentType(MediaType.APPLICATION_JSON)

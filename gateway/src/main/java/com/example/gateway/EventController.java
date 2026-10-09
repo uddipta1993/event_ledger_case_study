@@ -28,15 +28,15 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 @RestController
 public class EventController {
-    private final Map<String, Event> events = new ConcurrentHashMap<String, Event>();
     private final Map<String,AtomicLong> counts = new ConcurrentHashMap<String,AtomicLong>();
     private final RestTemplate client;
+    private final EventStore store;
     private final String accountUrl;
     private int consecutiveFailures = 0;
     private long circuitOpenUntil = 0;
 
-    public EventController(RestTemplate client, @Value("${account.service.url:http://localhost:8081}") String accountUrl) {
-        this.client=client; this.accountUrl=accountUrl;
+    public EventController(RestTemplate client, EventStore store, @Value("${account.service.url:http://localhost:8081}") String accountUrl) {
+        this.client=client; this.store=store; this.accountUrl=accountUrl;
     }
 
     @PostMapping("/events")
@@ -44,12 +44,12 @@ public class EventController {
         count("POST /events");
         if (!("CREDIT".equals(incoming.type) || "DEBIT".equals(incoming.type))) return error(HttpStatus.BAD_REQUEST,"type must be CREDIT or DEBIT");
         try { OffsetDateTime.parse(incoming.eventTimestamp); } catch(Exception ex) { return error(HttpStatus.BAD_REQUEST,"eventTimestamp must be ISO 8601"); }
-        Event event=events.get(incoming.eventId);
+        Event event=store.find(incoming.eventId);
         boolean duplicate=event!=null;
-        if (!duplicate) { event=incoming.copy(); event.applied=false; events.put(event.eventId,event); }
+        if (!duplicate) { event=incoming.copy(); event.applied=false; store.insert(event); }
         if (!event.applied) {
             try {
-                callAccount(event,trace); event.applied=true; consecutiveFailures=0;
+                callAccount(event,trace); event.applied=true; store.markApplied(event.eventId); consecutiveFailures=0;
             } catch(CircuitOpenException ex) { return error(HttpStatus.SERVICE_UNAVAILABLE,"Account Service circuit is open"); }
               catch(RestClientException ex) { failed(); return error(HttpStatus.SERVICE_UNAVAILABLE,"Account Service is unavailable; retry by submitting this event again"); }
         }
@@ -57,12 +57,11 @@ public class EventController {
     }
 
     @GetMapping("/events/{id}")
-    public ResponseEntity<?> get(@PathVariable String id) { count("GET /events/{id}"); Event e=events.get(id); return e==null?error(HttpStatus.NOT_FOUND,"event not found"):ResponseEntity.ok(e); }
+    public ResponseEntity<?> get(@PathVariable String id) { count("GET /events/{id}"); Event e=store.find(id); return e==null?error(HttpStatus.NOT_FOUND,"event not found"):ResponseEntity.ok(e); }
 
     @GetMapping("/events")
     public List<Event> list(@RequestParam("account") String account) {
-        count("GET /events"); List<Event> found=new ArrayList<Event>(); for(Event e:events.values()) if(account.equals(e.accountId)) found.add(e);
-        found.sort(Comparator.comparing(e -> OffsetDateTime.parse(e.eventTimestamp).toInstant())); return found;
+        count("GET /events"); return store.byAccount(account);
     }
 
     @GetMapping("/accounts/{id}/balance")
@@ -70,7 +69,7 @@ public class EventController {
     @GetMapping("/accounts/{id}")
     public ResponseEntity<?> account(@PathVariable String id, @RequestHeader(value="X-Trace-Id",required=false) String trace) { count("GET /accounts/{id}"); return forward("/accounts/"+id,trace); }
 
-    @GetMapping("/health") public Map<String,Object> health() { Map<String,Object> m=new LinkedHashMap<String,Object>(); m.put("status","UP"); m.put("service","gateway"); m.put("store","UP"); return m; }
+    @GetMapping("/health") public Map<String,Object> health() { Map<String,Object> m=new LinkedHashMap<String,Object>(); boolean healthy=store.healthy(); m.put("status",healthy?"UP":"DOWN"); m.put("service","gateway"); m.put("database",healthy?"UP":"DOWN"); return m; }
     @GetMapping("/metrics") public Map<String,Object> metrics() { Map<String,Object> m=new LinkedHashMap<String,Object>(); Map<String,Long> c=new LinkedHashMap<String,Long>(); for(String k:counts.keySet()) c.put(k,counts.get(k).get()); m.put("request_count_by_endpoint",c); return m; }
 
     private ResponseEntity<?> forward(String path,String trace) {

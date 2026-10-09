@@ -7,16 +7,22 @@ import java.math.BigDecimal;
 import java.util.Collections;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 class EventControllerTest {
+    private EventController controller(RestTemplate rest) {
+        DriverManagerDataSource ds=new DriverManagerDataSource("jdbc:h2:mem:gatewaytest"+java.util.UUID.randomUUID().toString().replace("-","")+";DB_CLOSE_DELAY=-1","sa",""); ds.setDriverClassName("org.h2.Driver");
+        return new EventController(rest,new EventStore(new JdbcTemplate(ds)),"http://account");
+    }
     private EventController.Event event(String id,String time) {
         EventController.Event e=new EventController.Event(); e.eventId=id; e.accountId="a1"; e.type="CREDIT"; e.amount=new BigDecimal("10"); e.currency="USD"; e.eventTimestamp=time; return e;
     }
     @Test void persistsListsChronologicallyAndReturnsOriginalOnDuplicate() {
         RestTemplate rest=mock(RestTemplate.class); when(rest.exchange(anyString(),eq(HttpMethod.POST),any(HttpEntity.class),eq(Object.class))).thenReturn(new ResponseEntity<Object>(Collections.emptyMap(),HttpStatus.OK));
-        EventController c=new EventController(rest,"http://account");
+        EventController c=controller(rest);
         assertEquals(HttpStatus.CREATED,c.submit(event("second","2026-02-02T00:00:00Z"),"t").getStatusCode());
         assertEquals(HttpStatus.CREATED,c.submit(event("first","2026-02-01T00:00:00Z"),"t").getStatusCode());
         assertEquals(HttpStatus.OK,c.submit(event("first","2026-02-01T00:00:00Z"),"t").getStatusCode());
@@ -25,7 +31,7 @@ class EventControllerTest {
     }
     @Test void passesTraceAndReturns503WhenAccountServiceIsDown() {
         RestTemplate rest=mock(RestTemplate.class); when(rest.exchange(anyString(),eq(HttpMethod.POST),any(HttpEntity.class),eq(Object.class))).thenThrow(new ResourceAccessException("down"));
-        EventController c=new EventController(rest,"http://account");
+        EventController c=controller(rest);
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE,c.submit(event("evt","2026-02-01T00:00:00Z"),"trace-123").getStatusCode());
         org.mockito.ArgumentCaptor<HttpEntity> request=org.mockito.ArgumentCaptor.forClass(HttpEntity.class);
         verify(rest,times(2)).exchange(anyString(),eq(HttpMethod.POST),request.capture(),eq(Object.class));
@@ -34,7 +40,7 @@ class EventControllerTest {
     }
     @Test void opensCircuitAfterRepeatedFailures() {
         RestTemplate rest=mock(RestTemplate.class); when(rest.exchange(anyString(),eq(HttpMethod.POST),any(HttpEntity.class),eq(Object.class))).thenThrow(new ResourceAccessException("down"));
-        EventController c=new EventController(rest,"http://account");
+        EventController c=controller(rest);
         c.submit(event("one","2026-02-01T00:00:00Z"),"t"); c.submit(event("two","2026-02-01T00:00:00Z"),"t"); c.submit(event("three","2026-02-01T00:00:00Z"),"t");
         org.springframework.http.ResponseEntity<?> blocked=c.submit(event("four","2026-02-01T00:00:00Z"),"t");
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE,blocked.getStatusCode());

@@ -1,6 +1,6 @@
 # Event Ledger
 
-Event Ledger is a small Java 8 take-home implementation with two independently runnable Spring Boot services. The public Gateway validates and records submitted events, then calls the internal Account Service synchronously. Each process owns its own in-memory state; restart clears that service's data.
+Event Ledger is a Java 8 take-home implementation with two independently runnable Spring Boot services. The public Gateway validates and records submitted events in its own H2 database, then calls the internal Account Service synchronously. The Account Service stores its transactions in a separate H2 database. Both databases run in memory and reset when their service restarts.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ Event Ledger is a small Java 8 take-home implementation with two independently r
 - `X-Trace-Id` is generated at the Gateway when absent and sent to Account Service. Both services emit JSON log records containing timestamp, level, service, and trace ID.
 - `eventTimestamp` controls chronological listing only. Account balances are derived from all applied entries, so arrival order does not affect the result.
 
-The two maps are process-local in-memory databases, which keeps the example dependency-light. They are deliberately not shared. A production deployment would replace them with durable stores and transactional outbox/reconciliation handling.
+The services use separate H2 database names and separate processes; they do not share a database or application state. A production deployment would use durable storage and transactional outbox/reconciliation handling.
 
 ## Run with Docker Compose
 
@@ -23,11 +23,17 @@ The Gateway is available at `http://localhost:8080`. The Account Service stays o
 
 ## Run locally
 
-From the repository root, start two terminals:
+From the repository root, build the project:
 
 ```sh
-mvn -f account/pom.xml spring-boot:run
-mvn -f gateway/pom.xml spring-boot:run
+mvn package
+```
+
+Then start each service in its own terminal:
+
+```sh
+java -jar account/target/account-service-1.0.0-exec.jar
+java -jar gateway/target/event-gateway-1.0.0.jar
 ```
 
 The Gateway defaults to `http://localhost:8081` for its Account Service URL. Override with `ACCOUNT_SERVICE_URL` if needed.
@@ -59,4 +65,4 @@ Tests cover validation, idempotency, order-independent balance calculation, trac
 
 ## Metrics and health
 
-Both services expose `GET /health`; the response reports service status and in-memory store availability. The Gateway exposes `GET /metrics` with request counts by method and path. JSON logs go to standard output.
+Both services expose `GET /health`; each checks its own H2 database. The Gateway exposes `GET /metrics` with request counts by method and path. JSON logs go to standard output.
