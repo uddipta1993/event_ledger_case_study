@@ -20,7 +20,7 @@ class AccountControllerTest {
         c.apply("a1",tx("later","DEBIT","20","2026-01-02T00:00:00Z"),"trace");
         c.apply("a1",tx("earlier","CREDIT","50","2026-01-01T00:00:00Z"),"trace");
         c.apply("a1",tx("later","DEBIT","20","2026-01-02T00:00:00Z"),"trace");
-        assertEquals(new BigDecimal("30"),c.balance("a1").get("balance"));
+        assertEquals(0,new BigDecimal("30").compareTo((BigDecimal)c.balance("a1").get("balance")));
         assertEquals(2,((java.util.List<?>)c.details("a1").get("transactions")).size());
     }
     @Test void rejectsInvalidTransactions() {
