@@ -1,0 +1,11 @@
+services:
+  account:
+    build: ./account
+  gateway:
+    build: ./gateway
+    ports:
+      - "8080:8080"
+    environment:
+      ACCOUNT_SERVICE_URL: http://account:8081
+    depends_on:
+      - account
